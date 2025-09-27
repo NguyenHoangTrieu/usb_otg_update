@@ -1,0 +1,54 @@
+# Build directories
+build/
+dist/
+out/
+
+# Object files
+*.o
+*.obj
+*.elf
+*.hex
+*.bin
+*.map
+
+# Compiler generated files
+*.d
+*.lst
+*.lss
+*.sym
+*.tmp
+
+# Debug files
+*.pdb
+*.ilk
+
+# IDE files
+.vscode/
+*.workspace
+*.uvproj*
+*.uvopt*
+*.eww
+*.ewp
+*.ewd
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*~
+*.swp
+*.swo
+*.tmp
+*.temp
+
+# Log files
+*.log
+
+# Dependencies
+node_modules/
