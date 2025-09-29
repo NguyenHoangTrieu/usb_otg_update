@@ -15,4 +15,4 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/esp_tinyusb: '*'
-  espressif/usb_host_cdc_acm: '*'
+  espressif/led_strip: '*'
