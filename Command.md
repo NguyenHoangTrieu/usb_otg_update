@@ -20,3 +20,4 @@ Here is a summary table of common `idf.py` commands used in ESP-IDF development,
 | python-clean           | idf.py python-clean                    | Removes Python byte code in ESP-IDF root (helpful after Python/ESP-IDF change)                                             |
 | uf2                    | idf.py uf2                             | Generates UF2 binary (all-in-one flashable file)                                                                           |
 | uf2-app                | idf.py uf2-app                         | Generates UF2 binary for application only                                                                                  |
+| add-dependency         | idf.py add-dependency <name>           | Adds a component dependency to the project (`--path` for local path, `--version` for specific version)                    |
