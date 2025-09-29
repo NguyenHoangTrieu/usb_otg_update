@@ -317,6 +317,7 @@ void class_driver_task(void *arg)
     while (1)
     {
         // Driver has unhandled devices, handle all devices first
+        led_on();
         if (driver_obj.mux_protected.flags.unhandled_devices)
         {
             xSemaphoreTake(driver_obj.constant.mux_lock, portMAX_DELAY); // Acquire mutex for thread safety
