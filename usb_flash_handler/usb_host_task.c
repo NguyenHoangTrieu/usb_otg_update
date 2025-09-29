@@ -482,7 +482,7 @@ esp_err_t usbcdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, 
 
     transfer->device_handle = dev->dev_hdl;
     transfer->num_bytes = max_len;
-    transfer->bEndpointAddress = dev->endpoint_in; // endpoint_in needs to be initialized from descriptor
+    transfer->bEndpointAddress = dev->dev_addr; //  needs to be initialized from descriptor
     // Optionally set callback/context if you need async handling
 
     err = usb_host_transfer_submit(transfer);
@@ -491,7 +491,7 @@ esp_err_t usbcdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, 
         // would go into your transfer callback
         memcpy(data, transfer->data_buffer, transfer->actual_num_bytes);
         *actual_len = transfer->actual_num_bytes;
-        ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X", (int)*actual_len, dev->endpoint_in);
+        ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X", (int)*actual_len, dev->dev_addr);
     } else {
         *actual_len = 0;
         ESP_LOGE("USBOTG", "USB Read failed: %d", err);
@@ -514,7 +514,7 @@ void usb_otg_rw_task(void *arg)
     size_t actual_len = 0;
 
     while (true) {
-        usb_device_t dev = NULL;
+        usb_device_t dev;
 
         // Protect access to driver handle via mutex
         xSemaphoreTake(s_driver_obj->constant.mux_lock, portMAX_DELAY);
@@ -528,10 +528,11 @@ void usb_otg_rw_task(void *arg)
         }
         xSemaphoreGive(s_driver_obj->constant.mux_lock);
 
-        if (dev_handle != NULL) {
+        if (dev.dev_hdl != NULL) {
             // --- Send data to device (send via OUT endpoint) ---
             led_show_green(); // Indicate data send
-            esp_err_t send_ret = usbcdc_send_data(dev, tx_data, sizeof(tx_data), 100); // 100ms timeout
+            ESP_LOGI("USB_OTG_RW", "End Point Address 0x%02X", dev.dev_addr);
+            esp_err_t send_ret = usbcdc_send_data(&dev, tx_data, sizeof(tx_data), 100); // 100ms timeout
             if (send_ret == ESP_OK) {
                 ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
             } else {
@@ -539,7 +540,7 @@ void usb_otg_rw_task(void *arg)
             }
 
             // --- Receive data from device (receive via IN endpoint) ---
-            esp_err_t recv_ret = usbcdc_receive_data(dev, rx_data, sizeof(rx_data), &actual_len); // 100ms timeout
+            esp_err_t recv_ret = usbcdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len); // 100ms timeout
             if (recv_ret == ESP_OK && actual_len > 0) {
                 ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
                 for (size_t i = 0; i < actual_len; ++i) {
