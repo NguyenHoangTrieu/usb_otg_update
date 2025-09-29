@@ -539,7 +539,7 @@ void usb_otg_rw_task(void *arg)
             }
 
             // Proceed with send/receive as before
-            led_show_green();  // Indicate busy
+            led_show_blue();  // Indicate busy
             ESP_LOGI("USB_OTG_RW", "End Point Address 0x%02X", dev.dev_addr);
             esp_err_t send_ret = usb_cdc_send_data(&dev, tx_data, sizeof(tx_data), 100);
             if (send_ret == ESP_OK) {
@@ -550,8 +550,11 @@ void usb_otg_rw_task(void *arg)
 
             esp_err_t recv_ret = usb_cdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len, 100);
             if (recv_ret == ESP_OK && actual_len > 0) {
-                ESP_LOGI("USB_OTG_RW", "Received %d bytes", (int)actual_len);
-                // Print data...
+                ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
+                for (size_t i = 0; i < actual_len; ++i) {
+                    printf("%02X ", rx_data[i]);
+                }
+                printf("\n");
             } else {
                 ESP_LOGW("USB_OTG_RW", "No data received or error: %d", recv_ret);
             }
