@@ -548,7 +548,7 @@ void usb_otg_rw_task(void *arg)
                 ESP_LOGE("USB_OTG_RW", "Send error: %d", send_ret);
             }
 
-            esp_err_t recv_ret = usb_cdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len, 100);
+            esp_err_t recv_ret = usb_cdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len);
             if (recv_ret == ESP_OK && actual_len > 0) {
                 ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
                 for (size_t i = 0; i < actual_len; ++i) {
