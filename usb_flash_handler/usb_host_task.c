@@ -325,7 +325,6 @@ void class_driver_task(void *arg) {
 
   while (1) {
     // Driver has unhandled devices, handle all devices first
-    led_on();
     ESP_LOGI(TAG, "Class Driver Active");
     if (driver_obj.mux_protected.flags.unhandled_devices) {
       xSemaphoreTake(driver_obj.constant.mux_lock,
@@ -571,7 +570,7 @@ void usb_otg_rw_task(void *arg) {
       led_show_green(); // Indicate done
     } else {
       ESP_LOGW("USB_OTG_RW", "No USB device currently opened. Task idle.");
-      led_show_white(); // Indicate idle
+      led_toggle_white(); // Indicate idle
     }
     vTaskDelay(pdMS_TO_TICKS(500));
   }
