@@ -523,37 +523,42 @@ void usb_otg_rw_task(void *arg)
             if (s_driver_obj->mux_protected.device[i].dev_hdl != NULL)
             {
                 dev = s_driver_obj->mux_protected.device[i]; // Get the first opened device handle
-                led_show_red(); // Indicate device busy
+                break;
             }
         }
         xSemaphoreGive(s_driver_obj->constant.mux_lock);
 
         if (dev.dev_hdl != NULL) {
-            // --- Send data to device (send via OUT endpoint) ---
-            led_show_green(); // Indicate data send
+            // New: Verify device is still valid
+            usb_device_info_t dev_info;
+            esp_err_t err = usb_host_device_info(dev.dev_hdl, &dev_info);
+            if (err != ESP_OK) {
+                ESP_LOGE("USB_OTG_RW", "Device invalid (err: %d) - likely disconnected. Skipping.", err);
+                led_show_red();  // Indicate error
+                continue;  // Skip transfers
+            }
+
+            // Proceed with send/receive as before
+            led_show_green();  // Indicate busy
             ESP_LOGI("USB_OTG_RW", "End Point Address 0x%02X", dev.dev_addr);
-            esp_err_t send_ret = usbcdc_send_data(&dev, tx_data, sizeof(tx_data), 100); // 100ms timeout
+            esp_err_t send_ret = usb_cdc_send_data(&dev, tx_data, sizeof(tx_data), 100);
             if (send_ret == ESP_OK) {
                 ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
             } else {
                 ESP_LOGE("USB_OTG_RW", "Send error: %d", send_ret);
             }
 
-            // --- Receive data from device (receive via IN endpoint) ---
-            esp_err_t recv_ret = usbcdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len); // 100ms timeout
+            esp_err_t recv_ret = usb_cdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len, 100);
             if (recv_ret == ESP_OK && actual_len > 0) {
-                ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
-                for (size_t i = 0; i < actual_len; ++i) {
-                    printf("%02X ", rx_data[i]);
-                }
-                printf("\n");
+                ESP_LOGI("USB_OTG_RW", "Received %d bytes", (int)actual_len);
+                // Print data...
             } else {
                 ESP_LOGW("USB_OTG_RW", "No data received or error: %d", recv_ret);
             }
-        } else {
-            ESP_LOGW("USB_OTG_RW", "No USB device currently opened. Task idle.");
+            led_show_green();  // Indicate done
+            } else {
+                ESP_LOGW("USB_OTG_RW", "No USB device currently opened. Task idle.");
+            }
+        vTaskDelay(pdMS_TO_TICKS(500));
         }
-
-        vTaskDelay(pdMS_TO_TICKS(500)); // Poll every 500ms
-    }
 }
