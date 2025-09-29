@@ -58,8 +58,8 @@ typedef struct {
     } constant;                                 /**< Constant members. Do not change after installation thus do not require a critical section or mutex */
 } class_driver_t;
 
-extern esp_err_t usb_cdc_send_data(const uint8_t *data, size_t len);
-extern esp_err_t usb_cdc_receive_data(uint8_t *data, size_t max_len, size_t *actual_len);
+extern esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len, int timeout_ms);
+extern esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, size_t *actual_len);
 extern void class_driver_client_deregister(void);
 
 extern void uart_task(void *arg);
