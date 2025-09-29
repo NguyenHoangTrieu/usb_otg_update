@@ -554,6 +554,7 @@ void usb_otg_rw_task(void *arg) {
         ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
       } else {
         ESP_LOGE("USB_OTG_RW", "Send error: %d", send_ret);
+        led_show_red(); // Indicate error
       }
 
       esp_err_t recv_ret =
