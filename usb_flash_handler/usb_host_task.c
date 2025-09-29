@@ -418,7 +418,7 @@ void usb_host_lib_task(void *arg)
  * @param[in] timeout_ms   Timeout in milliseconds
  * @return esp_err_t   ESP_OK if successful, error code otherwise
  */
-esp_err_t usbcdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len, int timeout_ms)
+esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len, int timeout_ms)
 {
     esp_err_t err;
     usb_transfer_t *transfer = NULL;
@@ -462,7 +462,7 @@ esp_err_t usbcdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len, i
  *
  * @return esp_err_t         ESP_OK if successful, error code otherwise
  */
-esp_err_t usbcdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, size_t *actual_len)
+esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, size_t *actual_len)
 {
     esp_err_t err;
     usb_transfer_t *transfer = NULL;
@@ -514,7 +514,7 @@ void usb_otg_rw_task(void *arg)
     size_t actual_len = 0;
 
     while (true) {
-        usb_device_t dev;
+        usb_device_t dev = {0};
 
         // Protect access to driver handle via mutex
         xSemaphoreTake(s_driver_obj->constant.mux_lock, portMAX_DELAY);
