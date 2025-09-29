@@ -89,4 +89,5 @@ void led_on(void)               { show_led_color(255, 40, 180); } // Pink: ready
 void led_show_blue(void)        { show_led_color(0, 0, 255);    } // Blue: flashing
 void led_show_green(void)       { show_led_color(0, 255, 0);    } // Green: flash successful
 void led_show_red(void)         { show_led_color(255, 0, 0);    } // Red: error
+void led_show_white(void)       { show_led_color(255, 255, 255);} // White: IDLE
 void led_off(void)              { show_led_color(0, 0, 0);      }

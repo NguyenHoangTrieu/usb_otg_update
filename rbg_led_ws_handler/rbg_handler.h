@@ -19,4 +19,5 @@ extern void led_off(void);
 extern void led_show_red(void);
 extern void led_show_blue(void);
 extern void led_show_green(void);
+extern void led_show_white(void);
 #endif // RBG_HANDLER_H
