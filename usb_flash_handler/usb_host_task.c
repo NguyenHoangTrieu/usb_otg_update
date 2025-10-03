@@ -2,6 +2,8 @@
 
 static const char *TAG = "ESP32_FLASH_BRIDGE";
 static class_driver_t *s_driver_obj;
+static usb_device_t connected_devices[DEV_MAX_COUNT];
+static uint8_t num_connected_devices = 0;
 
 /**
  * @brief Client event callback function for handling USB host events
@@ -25,6 +27,8 @@ static void client_event_cb(const usb_host_client_event_msg_t *event_msg,
                    portMAX_DELAY); // Acquire mutex for thread safety
     driver_obj->mux_protected.device[event_msg->new_dev.address].dev_addr =
         event_msg->new_dev.address;
+    ESP_LOGI(TAG, "Device connected at address %d",
+             event_msg->new_dev.address);
     driver_obj->mux_protected.device[event_msg->new_dev.address].dev_hdl = NULL;
     // Open the device next
     driver_obj->mux_protected.device[event_msg->new_dev.address].actions |=
