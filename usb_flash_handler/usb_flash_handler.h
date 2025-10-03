@@ -51,7 +51,7 @@ typedef struct {
     } constant;                                 /**< Constant members. Do not change after installation thus do not require a critical section or mutex */
 } class_driver_t;
 
-typedef struct usb_device_t {
+typedef struct {
     usb_host_client_handle_t client_hdl;
     uint8_t dev_addr;
     usb_device_handle_t dev_hdl;
