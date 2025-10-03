@@ -442,7 +442,7 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = len;
-  transfer->bEndpointAddress = 0x81; // endpoint_out needs to be initialized from descriptor
+  transfer->bEndpointAddress = 0x01; // endpoint_out needs to be initialized from descriptor
   transfer->timeout_ms = timeout_ms;
   memcpy(transfer->data_buffer, data, len);
 
@@ -490,7 +490,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = max_len;
-  transfer->bEndpointAddress = 0x81; //  needs to be initialized from descriptor
+  transfer->bEndpointAddress = 0x01; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
 
   err = usb_host_transfer_submit(transfer);
