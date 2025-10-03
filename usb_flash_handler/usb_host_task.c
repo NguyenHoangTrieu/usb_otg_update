@@ -10,7 +10,7 @@ static uint8_t num_connected_devices = 0;
  * @param dev Pointer to usb_device_t struct with valid dev_hdl and interface_num
  */
 static void claim_interface(usb_device_t *device_obj){
-    ESP_ERROR_CHECK(usb_host_interface_claim(device_obj->dev_hdl, device_obj->interface_num));
+    ESP_ERROR_CHECK(usb_host_interface_claim(device_obj->client_hdl, device_obj->dev_hdl, device_obj->interface_num, 0));
     ESP_LOGI(TAG, "Interface %d claimed for device addr %d", device_obj->interface_num, device_obj->dev_addr);
 }
 
