@@ -23,55 +23,52 @@ static void claim_interface(usb_device_t *device_obj) {
  * @param dev Pointer to usb_device_t struct with valid dev_hdl
  */
 static void parse_and_cache_endpoints(usb_device_t *dev) {
-  const usb_config_desc_t *config_desc = NULL;
-  dev->ep_out_addr = 0x00; // Reset before parsing
-  dev->ep_in_addr = 0x00;
+    const usb_config_desc_t *config_desc = NULL;
+    dev->ep_out_addr = 0x00;
+    dev->ep_in_addr  = 0x00;
+    dev->interface_num = 0; // Assume first/only interface
 
-  // Get the full configuration descriptor
-  ESP_ERROR_CHECK(
-      usb_host_get_active_config_descriptor(dev->dev_hdl, &config_desc));
+    ESP_ERROR_CHECK(usb_host_get_active_config_descriptor(dev->dev_hdl, &config_desc));
+    int offset = 0;
 
-  int offset = 0;
-  // Walk through all descriptors in the config descriptor
-  while (offset < config_desc->wTotalLength) {
-    const usb_standard_desc_t *desc =
-        (const usb_standard_desc_t *)(((const uint8_t *)config_desc) + offset);
-    if (desc->bDescriptorType == USB_DESC_TYPE_INTERFACE) {
-      const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
-      ESP_LOGI(TAG,
-               "Interface found: num=%u, class=0x%02X, subclass=0x%02X, "
-               "endpoints=%u",
-               intf->bInterfaceNumber, intf->bInterfaceClass,
-               intf->bInterfaceSubClass, intf->bNumEndpoints);
-      int ep_offset = offset + desc->bLength;
-      for (int ep_count = 0; ep_count < intf->bNumEndpoints; ep_count++) {
-        if (ep_offset >= config_desc->wTotalLength)
-          break;
-        const usb_standard_desc_t *epdesc =
-            (const usb_standard_desc_t *)(((const uint8_t *)config_desc) +
-                                          ep_offset);
-        if (epdesc->bDescriptorType == USB_DESC_TYPE_ENDPOINT) {
-          const usb_ep_desc_t *ep = (const usb_ep_desc_t *)epdesc;
-          ESP_LOGI(TAG, "-- Endpoint: addr=0x%02X, attr=0x%02X (type=%s)",
-                   ep->bEndpointAddress, ep->bmAttributes,
-                   ((ep->bmAttributes & 0x03) == 0x02)   ? "BULK"
-                   : ((ep->bmAttributes & 0x03) == 0x03) ? "INTERRUPT"
-                                                         : "OTHER");
+    while (offset < config_desc->wTotalLength) {
+        const usb_standard_desc_t *desc = (const usb_standard_desc_t *)(((const uint8_t *)config_desc) + offset);
+        if (desc->bDescriptorType == USB_DESC_TYPE_INTERFACE) {
+            const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
+            ESP_LOGI(TAG, "Interface found: num=%u, class=0x%02X, endpoints=%u",
+                intf->bInterfaceNumber, intf->bInterfaceClass, intf->bNumEndpoints);
+            dev->interface_num = intf->bInterfaceNumber; // Save interface num, usually 0
+
+            // Now parse this interface for endpoints (assign only BULK IN/OUT)
+            int ep_offset = offset + desc->bLength;
+            for (int ep_count = 0; ep_count < intf->bNumEndpoints; ep_count++) {
+                if (ep_offset >= config_desc->wTotalLength) break;
+                const usb_standard_desc_t *epdesc = (const usb_standard_desc_t *)(((const uint8_t *)config_desc) + ep_offset);
+                if (epdesc->bDescriptorType == USB_DESC_TYPE_ENDPOINT) {
+                    const usb_ep_desc_t *ep = (const usb_ep_desc_t *)epdesc;
+                    uint8_t ep_addr = ep->bEndpointAddress;
+                    uint8_t ep_type = ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK;
+                    if (ep_type == USB_BM_ATTRIBUTES_XFER_BULK) {
+                        if (ep_addr & 0x80)
+                            dev->ep_in_addr = ep_addr;
+                        else
+                            dev->ep_out_addr = ep_addr;
+                        ESP_LOGI(TAG, "-- Found BULK EP addr=0x%02X direction=%s",
+                            ep_addr, (ep_addr & 0x80) ? "IN" : "OUT");
+                    }
+                }
+                ep_offset += epdesc->bLength;
+            }
+            // Break after first interface (for single-interface vendor serials)
+            break;
         }
-        ep_offset += epdesc->bLength;
-      }
+        offset += desc->bLength;
     }
-    offset += desc->bLength;
-  }
-
-  ESP_LOGI(TAG, "Parsed endpoints: OUT=0x%02X, IN=0x%02X (Intf=%u)",
-           dev->ep_out_addr, dev->ep_in_addr, dev->interface_num);
-
-  // Sanity check warning
-  if (dev->ep_out_addr == 0x00 || dev->ep_in_addr == 0x00) {
-    ESP_LOGW(TAG, "Could not find CDC BULK endpoints. Device may not be CDC "
-                  "ACM or parse logic needs adjustment.");
-  }
+    ESP_LOGI(TAG, "Parsed endpoints: OUT=0x%02X, IN=0x%02X (Intf=%u)",
+             dev->ep_out_addr, dev->ep_in_addr, dev->interface_num);
+    if (dev->ep_out_addr == 0x00 || dev->ep_in_addr == 0x00) {
+        ESP_LOGE(TAG, "USB serial/parsing failed. No valid BULK endpoints assigned!");
+    }
 }
 /**
  * @brief Client event callback function for handling USB host events
