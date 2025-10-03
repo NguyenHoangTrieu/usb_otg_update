@@ -5,6 +5,11 @@ static class_driver_t *s_driver_obj;
 static usb_device_t connected_devices[DEV_MAX_COUNT];
 static uint8_t num_connected_devices = 0;
 
+// Dummy transfer callback for async transfers
+static void transfer_cb(usb_transfer_t *transfer) {
+    // Dummy callback, can be empty
+}
+
 /** Claims the interface for the given device.
  * This is necessary before performing any data transfers.
  * @param dev Pointer to usb_device_t struct with valid dev_hdl and
@@ -515,6 +520,7 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
   transfer->bEndpointAddress =
       dev->ep_out_addr; // endpoint_out needs to be initialized from descriptor
   transfer->timeout_ms = timeout_ms;
+  transfer->callback = transfer_cb;
   memcpy(transfer->data_buffer, data, len);
 
   err = usb_host_transfer_submit(transfer);
@@ -561,10 +567,9 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = max_len;
-  transfer->bEndpointAddress =
-      dev->ep_in_addr; //  needs to be initialized from descriptor
+  transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
-
+  transfer->callback = transfer_cb;
   err = usb_host_transfer_submit(transfer);
   if (err == ESP_OK) {
     // In sync (poll) case: memory will have been updated immediately; in
@@ -621,7 +626,6 @@ void usb_otg_rw_task(void *arg) {
 
       // Proceed with send/receive as before
       led_show_blue(); // Indicate busy
-      ESP_LOGI("USB_OTG_RW", "End Point Address 0x%02X", dev.dev_addr);
       esp_err_t send_ret =
           usb_cdc_send_data(&dev, tx_data, sizeof(tx_data), 100);
       if (send_ret == ESP_OK) {
