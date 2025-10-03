@@ -33,6 +33,18 @@ typedef enum {
 #define DEV_MAX_COUNT           128
 
 typedef struct {
+    usb_host_client_handle_t client_hdl;
+    uint8_t dev_addr;
+    usb_device_handle_t dev_hdl;
+    action_t actions;
+
+    // --- Add for endpoint/interface tracking ---
+    uint8_t interface_num;      // CDC interface number found.
+    uint8_t ep_out_addr;        // OUT endpoint address for data (parse from descriptor)
+    uint8_t ep_in_addr;         // IN endpoint address for data (parse from descriptor)
+} usb_device_t;
+
+typedef struct {
     struct {
         union {
             struct {
@@ -50,19 +62,6 @@ typedef struct {
         SemaphoreHandle_t mux_lock;         /**< Mutex for protected members */
     } constant;                                 /**< Constant members. Do not change after installation thus do not require a critical section or mutex */
 } class_driver_t;
-
-typedef struct {
-    usb_host_client_handle_t client_hdl;
-    uint8_t dev_addr;
-    usb_device_handle_t dev_hdl;
-    action_t actions;
-
-    // --- Add for endpoint/interface tracking ---
-    uint8_t interface_num;      // CDC interface number found.
-    uint8_t ep_out_addr;        // OUT endpoint address for data (parse from descriptor)
-    uint8_t ep_in_addr;         // IN endpoint address for data (parse from descriptor)
-} usb_device_t;
-
 
 extern esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len, int timeout_ms);
 extern esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, size_t *actual_len);
