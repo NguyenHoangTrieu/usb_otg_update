@@ -23,46 +23,59 @@ static void claim_interface(usb_device_t *device_obj) {
  * @param dev Pointer to usb_device_t struct with valid dev_hdl
  */
 static void parse_and_cache_endpoints(usb_device_t *dev) {
-  const usb_config_desc_t *config_desc = NULL;
-  ESP_ERROR_CHECK(
-      usb_host_get_active_config_descriptor(dev->dev_hdl, &config_desc));
-  int offset = 0;
+    const usb_config_desc_t *config_desc = NULL;
+    dev->ep_out_addr = 0x00; // Reset before parsing
+    dev->ep_in_addr  = 0x00;
 
-  // Walk through all interfaces
-  while (offset < config_desc->wTotalLength) {
-    const usb_intf_desc_t *intf = usb_parse_next_descriptor_of_type(
-        (uint8_t *)config_desc, config_desc->wTotalLength,
-        USB_DESC_TYPE_INTERFACE, &offset);
-    if (!intf)
-      break;
+    // Get the full configuration descriptor
+    ESP_ERROR_CHECK(usb_host_get_active_config_descriptor(dev->dev_hdl, &config_desc));
 
-    // Look for CDC-Data class (0x0A)
-    if (intf->bInterfaceClass == 0x0A) {
-      dev->interface_num = intf->bInterfaceNumber; // claim this interface!
-      // Loop endpoints in this interface:
-      int ep_offset = offset;
-      for (int i = 0; i < intf->bNumEndpoints; i++) {
-        const usb_ep_desc_t *ep_desc = usb_parse_endpoint_descriptor_by_index(
-            intf, i, config_desc->wTotalLength, &ep_offset);
-        if (!ep_desc)
-          continue;
-        uint8_t ep_addr = ep_desc->bEndpointAddress;
-        uint8_t ep_type =
-            ep_desc->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK;
-        if (ep_type == USB_BM_ATTRIBUTES_XFER_BULK) {
-          if (ep_addr & 0x80)
-            dev->ep_in_addr = ep_addr; // IN endpoint
-          else
-            dev->ep_out_addr = ep_addr; // OUT endpoint
+    int offset = 0;
+    // Walk through all descriptors in the config descriptor
+    while (offset < config_desc->wTotalLength) {
+        const usb_standard_desc_t *desc = (const usb_standard_desc_t *)(((const uint8_t *)config_desc) + offset);
+
+        // Look for INTERFACE descriptors
+        if (desc->bDescriptorType == USB_DESC_TYPE_INTERFACE) {
+            const usb_intf_desc_t *intf = (const usb_intf_desc_t *)desc;
+            // Looking for CDC Data interface (class 0x0A)
+            if (intf->bInterfaceClass == CDC_DATA_INTERFACE_CLASS) {
+                dev->interface_num = intf->bInterfaceNumber;
+                // Parse endpoints inside this interface
+                int ep_offset = offset + desc->bLength;
+                for (int ep_count = 0; ep_count < intf->bNumEndpoints; ep_count++) {
+                    if (ep_offset >= config_desc->wTotalLength) break;
+                    const usb_standard_desc_t *epdesc = (const usb_standard_desc_t *)(((const uint8_t *)config_desc) + ep_offset);
+                    if (epdesc->bDescriptorType == USB_DESC_TYPE_ENDPOINT) {
+                        const usb_ep_desc_t *ep = (const usb_ep_desc_t *)epdesc;
+                        uint8_t ep_addr = ep->bEndpointAddress;
+                        uint8_t ep_type = ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK;
+                        // Only accept BULK endpoints
+                        if (ep_type == USB_BM_ATTRIBUTES_XFER_BULK) {
+                            if (ep_addr & 0x80) { // IN endpoint
+                                dev->ep_in_addr = ep_addr;
+                            } else {              // OUT endpoint
+                                dev->ep_out_addr = ep_addr;
+                            }
+                        }
+                    }
+                    ep_offset += epdesc->bLength;
+                }
+                // We found CDC Data interface, done parsing (usually only want one)
+                break;
+            }
         }
-      }
-      break; // Stop if found CDC-Data
+        offset += desc->bLength;
     }
-  }
-  ESP_LOGI(TAG, "Parsed endpoints: OUT=0x%02x, IN=0x%02x (Intf=%u)",
-           dev->ep_out_addr, dev->ep_in_addr, dev->interface_num);
-}
 
+    ESP_LOGI(TAG, "Parsed endpoints: OUT=0x%02X, IN=0x%02X (Intf=%u)",
+                dev->ep_out_addr, dev->ep_in_addr, dev->interface_num);
+
+    // Sanity check warning
+    if (dev->ep_out_addr == 0x00 || dev->ep_in_addr == 0x00) {
+        ESP_LOGW(TAG, "Could not find CDC BULK endpoints. Device may not be CDC ACM or parse logic needs adjustment.");
+    }
+}
 /**
  * @brief Client event callback function for handling USB host events
  *

@@ -30,6 +30,10 @@ typedef enum {
     ACTION_CLOSE_DEV        = (1 << 5),
 } action_t;
 
+#define USB_DESC_TYPE_INTERFACE 0x04
+#define USB_DESC_TYPE_ENDPOINT  0x05
+#define CDC_DATA_INTERFACE_CLASS 0x0A // CDC Data class
+
 #define DEV_MAX_COUNT           128
 
 typedef struct {
