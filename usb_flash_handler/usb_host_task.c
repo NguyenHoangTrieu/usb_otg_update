@@ -7,48 +7,61 @@ static uint8_t num_connected_devices = 0;
 
 /** Claims the interface for the given device.
  * This is necessary before performing any data transfers.
- * @param dev Pointer to usb_device_t struct with valid dev_hdl and interface_num
+ * @param dev Pointer to usb_device_t struct with valid dev_hdl and
+ * interface_num
  */
-static void claim_interface(usb_device_t *device_obj){
-    ESP_ERROR_CHECK(usb_host_interface_claim(device_obj->client_hdl, device_obj->dev_hdl, device_obj->interface_num, 0));
-    ESP_LOGI(TAG, "Interface %d claimed for device addr %d", device_obj->interface_num, device_obj->dev_addr);
+static void claim_interface(usb_device_t *device_obj) {
+  ESP_ERROR_CHECK(usb_host_interface_claim(device_obj->client_hdl,
+                                           device_obj->dev_hdl,
+                                           device_obj->interface_num, 0));
+  ESP_LOGI(TAG, "Interface %d claimed for device addr %d",
+           device_obj->interface_num, device_obj->dev_addr);
 }
 
-/** Parses endpoints for CDC/Data class. Call in action_get_config_desc or after enumeration.
- * Caches endpoint addresses in usb_device_t struct for later use.
+/** Parses endpoints for CDC/Data class. Call in action_get_config_desc or after
+ * enumeration. Caches endpoint addresses in usb_device_t struct for later use.
  * @param dev Pointer to usb_device_t struct with valid dev_hdl
  */
 static void parse_and_cache_endpoints(usb_device_t *dev) {
-    const usb_config_desc_t *config_desc = NULL;
-    ESP_ERROR_CHECK(usb_host_get_active_config_descriptor(dev->dev_hdl, &config_desc));
-    int offset = 0;
-    // Loop through interfaces looking for correct class/subclass.
-    const usb_intf_desc_t *intf_desc;
-    for (;;) {
-        intf_desc = usb_parse_interface_descriptor(config_desc, dev->interface_num, 0, &offset);
-        if (!intf_desc) break;
-        // You may want to check for a specific class (e.g., CDC Data 0x0A or your target class)
-        if (intf_desc->bInterfaceClass == 0x0A) {
-            // Cache the found interface number (optional if not hardcoded)
-            dev->interface_num = intf_desc->bInterfaceNumber;
-            // Now parse endpoints on this interface
-            for (int i = 0; i < intf_desc->bNumEndpoints; i++) {
-                const usb_ep_desc_t *ep = usb_parse_endpoint_descriptor_by_index(intf_desc, i, config_desc->wTotalLength, &offset);
-                if (ep) {
-                    if ((ep->bEndpointAddress & 0x80) == 0x80) { // IN endpoint
-                        dev->ep_in_addr = ep->bEndpointAddress;
-                    } else {
-                        dev->ep_out_addr = ep->bEndpointAddress;
-                    }
-                }
-            }
-        }
-        // Advance to next interface if needed -- break if you only want the first CDC data one.
-        break;
-    }
-    ESP_LOGI(TAG, "Parsed endpoints: OUT=0x%02x, IN=0x%02x (Intf=%u)", dev->ep_out_addr, dev->ep_in_addr, dev->interface_num);
-}
+  const usb_config_desc_t *config_desc = NULL;
+  ESP_ERROR_CHECK(
+      usb_host_get_active_config_descriptor(dev->dev_hdl, &config_desc));
+  int offset = 0;
 
+  // Walk through all interfaces
+  while (offset < config_desc->wTotalLength) {
+    const usb_intf_desc_t *intf = usb_parse_next_descriptor_of_type(
+        (uint8_t *)config_desc, config_desc->wTotalLength,
+        USB_DESC_TYPE_INTERFACE, &offset);
+    if (!intf)
+      break;
+
+    // Look for CDC-Data class (0x0A)
+    if (intf->bInterfaceClass == 0x0A) {
+      dev->interface_num = intf->bInterfaceNumber; // claim this interface!
+      // Loop endpoints in this interface:
+      int ep_offset = offset;
+      for (int i = 0; i < intf->bNumEndpoints; i++) {
+        const usb_ep_desc_t *ep_desc = usb_parse_endpoint_descriptor_by_index(
+            intf, i, config_desc->wTotalLength, &ep_offset);
+        if (!ep_desc)
+          continue;
+        uint8_t ep_addr = ep_desc->bEndpointAddress;
+        uint8_t ep_type =
+            ep_desc->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK;
+        if (ep_type == USB_BM_ATTRIBUTES_XFER_BULK) {
+          if (ep_addr & 0x80)
+            dev->ep_in_addr = ep_addr; // IN endpoint
+          else
+            dev->ep_out_addr = ep_addr; // OUT endpoint
+        }
+      }
+      break; // Stop if found CDC-Data
+    }
+  }
+  ESP_LOGI(TAG, "Parsed endpoints: OUT=0x%02x, IN=0x%02x (Intf=%u)",
+           dev->ep_out_addr, dev->ep_in_addr, dev->interface_num);
+}
 
 /**
  * @brief Client event callback function for handling USB host events
@@ -198,9 +211,9 @@ static void action_get_config_desc(usb_device_t *device_obj) {
       NULL); // Print configuration descriptor with all interfaces and endpoints
   // Get the device's string descriptors next
   device_obj->actions |= ACTION_GET_STR_DESC;
-  parse_and_cache_endpoints(device_obj); // Parse and cache endpoints for CDC/Data class
+  parse_and_cache_endpoints(
+      device_obj);             // Parse and cache endpoints for CDC/Data class
   claim_interface(device_obj); // Claim the interface for communication
-
 }
 
 /**
@@ -249,7 +262,8 @@ static void action_close_dev(usb_device_t *device_obj) {
       device_obj->dev_hdl)); // Close USB device using USB Host Library
   device_obj->dev_hdl = NULL;
   device_obj->dev_addr = 0;
-  usb_host_interface_release(device_obj->client_hdl, device_obj->dev_hdl, device_obj->interface_num);
+  usb_host_interface_release(device_obj->client_hdl, device_obj->dev_hdl,
+                             device_obj->interface_num);
   ESP_LOGI(TAG, "Device disconnected and closed");
   led_show_red(); // Indicate device disconnected
 }
@@ -491,7 +505,8 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = len;
-  transfer->bEndpointAddress = dev->ep_out_addr; // endpoint_out needs to be initialized from descriptor
+  transfer->bEndpointAddress =
+      dev->ep_out_addr; // endpoint_out needs to be initialized from descriptor
   transfer->timeout_ms = timeout_ms;
   memcpy(transfer->data_buffer, data, len);
 
@@ -539,7 +554,8 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = max_len;
-  transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
+  transfer->bEndpointAddress =
+      dev->ep_in_addr; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
 
   err = usb_host_transfer_submit(transfer);
