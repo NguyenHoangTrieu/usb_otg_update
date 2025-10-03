@@ -198,8 +198,8 @@ static void action_get_config_desc(usb_device_t *device_obj) {
       NULL); // Print configuration descriptor with all interfaces and endpoints
   // Get the device's string descriptors next
   device_obj->actions |= ACTION_GET_STR_DESC;
-  // parse_and_cache_endpoints(device_obj); // Parse and cache endpoints for CDC/Data class
-  // claim_interface(device_obj); // Claim the interface for communication
+  parse_and_cache_endpoints(device_obj); // Parse and cache endpoints for CDC/Data class
+  claim_interface(device_obj); // Claim the interface for communication
 
 }
 
