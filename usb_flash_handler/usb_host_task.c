@@ -580,60 +580,50 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
   }
   return err;
 }
-// USB Standard Setup Packet structure
-typedef struct {
-    uint8_t  bmRequestType;
-    uint8_t  bRequest;
-    uint16_t wValue;
-    uint16_t wIndex;
-    uint16_t wLength;
-} __attribute__((packed)) usb_setup_packet_t;
-
-void ch340_set_baudrate_115200(usb_device_t *dev)
-{
+void ch340_set_baudrate_115200(usb_device_t *dev) {
     uint32_t divisor = 1532620800UL / 115200UL;
     if (divisor > 0) divisor--;
     uint16_t value = divisor & 0xFFFF;
     uint16_t index = ((divisor >> 8) & 0xFF) | 0x0080;
 
-    // ---- First control transfer (set value) ----
+    // First setup packet
     usb_transfer_t *ctrl1 = NULL;
-    ESP_ERROR_CHECK(usb_host_transfer_alloc(8, 0, &ctrl1)); // Control setup packet = 8 bytes
+    ESP_ERROR_CHECK(usb_host_transfer_alloc(sizeof(usb_setup_packet_t), 0, &ctrl1));
     ctrl1->device_handle = dev->dev_hdl;
-    ctrl1->bEndpointAddress = 0; // EP0
+    ctrl1->bEndpointAddress = 0;
     ctrl1->callback = transfer_cb;
     ctrl1->context = NULL;
-    ctrl1->num_bytes = 8;        // 8-byte setup packet, wLength == 0 means no data stage
+    ctrl1->num_bytes = sizeof(usb_setup_packet_t);
 
     usb_setup_packet_t setup1 = {
-        .bmRequestType = 0x40,     // Vendor, OUT (host-to-device)
+        .bmRequestType = 0x40,
         .bRequest      = 0x9A,
         .wValue        = 0x1312,
         .wIndex        = value,
-        .wLength       = 0
+        .wLength       = 0,
     };
-    memcpy(ctrl1->data_buffer, &setup1, 8); // Setup packet is always first 8 bytes!
+    memcpy(ctrl1->data_buffer, &setup1, sizeof(setup1));
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl1));
     vTaskDelay(pdMS_TO_TICKS(10));
     usb_host_transfer_free(ctrl1);
 
-    // ---- Second control transfer (set index) ----
+    // Second setup packet
     usb_transfer_t *ctrl2 = NULL;
-    ESP_ERROR_CHECK(usb_host_transfer_alloc(8, 0, &ctrl2));
+    ESP_ERROR_CHECK(usb_host_transfer_alloc(sizeof(usb_setup_packet_t), 0, &ctrl2));
     ctrl2->device_handle = dev->dev_hdl;
     ctrl2->bEndpointAddress = 0;
     ctrl2->callback = transfer_cb;
     ctrl2->context = NULL;
-    ctrl2->num_bytes = 8;
+    ctrl2->num_bytes = sizeof(usb_setup_packet_t);
 
     usb_setup_packet_t setup2 = {
         .bmRequestType = 0x40,
         .bRequest      = 0x9A,
         .wValue        = 0x0F2C,
         .wIndex        = index,
-        .wLength       = 0
+        .wLength       = 0,
     };
-    memcpy(ctrl2->data_buffer, &setup2, 8);
+    memcpy(ctrl2->data_buffer, &setup2, sizeof(setup2));
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl2));
     vTaskDelay(pdMS_TO_TICKS(10));
     usb_host_transfer_free(ctrl2);
