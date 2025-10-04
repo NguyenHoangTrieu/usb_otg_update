@@ -567,7 +567,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = max_len;
-  transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
+  transfer->bEndpointAddress = dev->ep_out_addr; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
   transfer->callback = transfer_cb;
   err = usb_host_transfer_submit(transfer);
@@ -599,23 +599,22 @@ void usb_otg_rw_task(void *arg) {
   size_t actual_len = 0;
 
   while (true) {
-    usb_device_t dev = {0};
+    usb_device_t *dev = NULL;
 
     // Protect access to driver handle via mutex
     xSemaphoreTake(s_driver_obj->constant.mux_lock, portMAX_DELAY);
     for (uint8_t i = 0; i < DEV_MAX_COUNT; i++) {
       if (s_driver_obj->mux_protected.device[i].dev_hdl != NULL) {
-        dev = s_driver_obj->mux_protected
-                  .device[i]; // Get the first opened device handle
+        dev = &s_driver_obj->mux_protected.device[i]; // Get the first opened device handle
         break;
       }
     }
     xSemaphoreGive(s_driver_obj->constant.mux_lock);
 
-    if (dev.dev_hdl != NULL) {
+    if (dev != NULL) {
       // New: Verify device is still valid
       usb_device_info_t dev_info;
-      esp_err_t err = usb_host_device_info(dev.dev_hdl, &dev_info);
+      esp_err_t err = usb_host_device_info(dev->dev_hdl, &dev_info);
       if (err != ESP_OK) {
         ESP_LOGE("USB_OTG_RW",
                  "Device invalid (err: %d) - likely disconnected. Skipping.",
@@ -627,7 +626,7 @@ void usb_otg_rw_task(void *arg) {
       // Proceed with send/receive as before
       led_show_blue(); // Indicate busy
       esp_err_t send_ret =
-          usb_cdc_send_data(&dev, tx_data, sizeof(tx_data), 100);
+          usb_cdc_send_data(dev, tx_data, sizeof(tx_data), 100);
       if (send_ret == ESP_OK) {
         ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
       } else {
@@ -636,7 +635,7 @@ void usb_otg_rw_task(void *arg) {
       }
 
       esp_err_t recv_ret =
-          usb_cdc_receive_data(&dev, rx_data, sizeof(rx_data), &actual_len);
+          usb_cdc_receive_data(dev, rx_data, sizeof(rx_data), &actual_len);
       if (recv_ret == ESP_OK && actual_len > 0) {
         ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
         for (size_t i = 0; i < actual_len; ++i) {
