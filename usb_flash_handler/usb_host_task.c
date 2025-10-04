@@ -520,7 +520,7 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
   transfer->bEndpointAddress =
       dev->ep_out_addr; // endpoint_out needs to be initialized from descriptor
   transfer->timeout_ms = timeout_ms;
-  transfer->callback = transfer_cb;
+  transfer->callback = NULL; // transfer_cb;
   memcpy(transfer->data_buffer, data, len);
 
   err = usb_host_transfer_submit(transfer);
@@ -528,11 +528,10 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
   if (err == ESP_OK) {
     ESP_LOGI("USBOTG", "Sent %d bytes to device: endpoint 0x%02X", (int)len,
              dev->ep_out_addr);
+    usb_host_transfer_free(transfer);
   } else {
     ESP_LOGE("USBOTG", "USB Send failed: %d", err);
   }
-
-  usb_host_transfer_free(transfer);
   return err;
 }
 
@@ -569,21 +568,20 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
   transfer->num_bytes = max_len;
   transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
-  transfer->callback = transfer_cb;
+  transfer->callback = NULL;
   err = usb_host_transfer_submit(transfer);
   if (err == ESP_OK) {
     // In sync (poll) case: memory will have been updated immediately; in
     // async/callback, this part would go into your transfer callback
     memcpy(data, transfer->data_buffer, transfer->actual_num_bytes);
     *actual_len = transfer->actual_num_bytes;
-    // ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X",
-    //          (int)*actual_len, dev->ep_in_addr);
+    ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X",
+             (int)*actual_len, dev->ep_in_addr);
+    usb_host_transfer_free(transfer);
   } else {
     *actual_len = 0;
     ESP_LOGE("USBOTG", "USB Read failed: %d", err);
   }
-
-  usb_host_transfer_free(transfer);
   return err;
 }
 
