@@ -582,59 +582,53 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
 }
 
 /**
- * Set CH340 baudrate to 115200 through two USB vendor-specific control transfers.
- * This configures the chip's physical UART TX/RX lines to run at 115200 baud.
- * Do NOT require any external driver library - all logic inside this task.
+ * Set CH340 baudrate to 115200 using USB vendor-specific control transfers.
+ * Fills ctrl transfer fields directly - no .setup member required.
+ * Call once after the device is ready and before any stream data.
+ * Any data sent through the CH340 USB endpoints will now be serialized at 115200 baud.
  */
 void ch340_set_baudrate_115200(usb_device_t *dev) {
-    // Calculate divisor using CH340 protocol: divisor = 1532620800 / baudrate - 1
-    uint32_t divisor = 1532620800 / 115200UL;
+    // Calculate divisor according to CH340 datasheet
+    uint32_t divisor = 1532620800UL / 115200UL;
     if (divisor > 0) divisor--;
     uint16_t value = divisor & 0xFFFF;
     uint16_t index = ((divisor >> 8) & 0xFF) | 0x0080;
 
-    // First vendor-specific control transfer:
-    // bmRequestType: 0x40 (vendor, OUT)
-    // bRequest:      0x9A
-    // wValue:        0x1312
-    // wIndex:        calculated 'value'
+    // First vendor-specific control transfer (set value)
     usb_transfer_t *ctrl1 = NULL;
     ESP_ERROR_CHECK(usb_host_transfer_alloc(0, 0, &ctrl1));
     ctrl1->device_handle = dev->dev_hdl;
-    ctrl1->bEndpointAddress = 0; // control endpoint
-    ctrl1->callback = transfer_cb; // dummy callback, not NULL
+    ctrl1->bEndpointAddress = 0;   // control endpoint always 0
+    ctrl1->callback = transfer_cb; // must not be NULL
     ctrl1->num_bytes = 0;
-    ctrl1->setup.bmRequestType = 0x40;
-    ctrl1->setup.bRequest      = 0x9A;
-    ctrl1->setup.wValue        = 0x1312;
-    ctrl1->setup.wIndex        = value;
-    ctrl1->setup.wLength       = 0;
+    ctrl1->bmRequestType = 0x40;   // Vendor OUT (Host to device)
+    ctrl1->bRequest      = 0x9A;
+    ctrl1->wValue        = 0x1312;
+    ctrl1->wIndex        = value;
+    ctrl1->wLength       = 0;
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl1));
-    // Small delay to ensure CH340 processes control command
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(10)); // Give device time to process
+    // DO NOT free the transfer inside callback to stay esp-idf async safe, only set a done flag if you want!
     usb_host_transfer_free(ctrl1);
 
-    // Second control transfer to finalize baudrate:
-    // bRequest:      0x9A
-    // wValue:        0x0F2C
-    // wIndex:        calculated 'index'
+    // Second control transfer (set index)
     usb_transfer_t *ctrl2 = NULL;
     ESP_ERROR_CHECK(usb_host_transfer_alloc(0, 0, &ctrl2));
     ctrl2->device_handle = dev->dev_hdl;
-    ctrl2->bEndpointAddress = 0; // control endpoint
+    ctrl2->bEndpointAddress = 0;
     ctrl2->callback = transfer_cb;
     ctrl2->num_bytes = 0;
-    ctrl2->setup.bmRequestType = 0x40;
-    ctrl2->setup.bRequest      = 0x9A;
-    ctrl2->setup.wValue        = 0x0F2C;
-    ctrl2->setup.wIndex        = index;
-    ctrl2->setup.wLength       = 0;
+    ctrl2->bmRequestType = 0x40;
+    ctrl2->bRequest      = 0x9A;
+    ctrl2->wValue        = 0x0F2C;
+    ctrl2->wIndex        = index;
+    ctrl2->wLength       = 0;
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl2));
     vTaskDelay(pdMS_TO_TICKS(10));
     usb_host_transfer_free(ctrl2);
-    // After this, any UART signals from CH340 TX/RX pins are at exactly 115200 baud
-}
 
+    ESP_LOGI("CH340", "Configured baudrate to 115200 for CH340.");
+}
 
 /**
  * @brief Example FreeRTOS task that performs USB OTG read and write operations
