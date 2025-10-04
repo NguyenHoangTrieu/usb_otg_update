@@ -580,56 +580,66 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
   }
   return err;
 }
+// USB Standard Setup Packet structure
+typedef struct {
+    uint8_t  bmRequestType;
+    uint8_t  bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
+} __attribute__((packed)) usb_setup_packet_t;
 
-/**
- * Set CH340 baudrate to 115200 using USB vendor-specific control transfers.
- * Fills ctrl transfer fields directly - no .setup member required.
- * Call once after the device is ready and before any stream data.
- * Any data sent through the CH340 USB endpoints will now be serialized at 115200 baud.
- */
-void ch340_set_baudrate_115200(usb_device_t *dev) {
-    // Calculate divisor according to CH340 datasheet
+void ch340_set_baudrate_115200(usb_device_t *dev)
+{
     uint32_t divisor = 1532620800UL / 115200UL;
     if (divisor > 0) divisor--;
     uint16_t value = divisor & 0xFFFF;
     uint16_t index = ((divisor >> 8) & 0xFF) | 0x0080;
 
-    // First vendor-specific control transfer (set value)
+    // ---- First control transfer (set value) ----
     usb_transfer_t *ctrl1 = NULL;
-    ESP_ERROR_CHECK(usb_host_transfer_alloc(0, 0, &ctrl1));
+    ESP_ERROR_CHECK(usb_host_transfer_alloc(8, 0, &ctrl1)); // Control setup packet = 8 bytes
     ctrl1->device_handle = dev->dev_hdl;
-    ctrl1->bEndpointAddress = 0;   // control endpoint always 0
-    ctrl1->callback = transfer_cb; // must not be NULL
-    ctrl1->num_bytes = 0;
-    ctrl1->bmRequestType = 0x40;   // Vendor OUT (Host to device)
-    ctrl1->bRequest      = 0x9A;
-    ctrl1->wValue        = 0x1312;
-    ctrl1->wIndex        = value;
-    ctrl1->wLength       = 0;
+    ctrl1->bEndpointAddress = 0; // EP0
+    ctrl1->callback = transfer_cb;
+    ctrl1->context = NULL;
+    ctrl1->num_bytes = 8;        // 8-byte setup packet, wLength == 0 means no data stage
+
+    usb_setup_packet_t setup1 = {
+        .bmRequestType = 0x40,     // Vendor, OUT (host-to-device)
+        .bRequest      = 0x9A,
+        .wValue        = 0x1312,
+        .wIndex        = value,
+        .wLength       = 0
+    };
+    memcpy(ctrl1->data_buffer, &setup1, 8); // Setup packet is always first 8 bytes!
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl1));
-    vTaskDelay(pdMS_TO_TICKS(10)); // Give device time to process
-    // DO NOT free the transfer inside callback to stay esp-idf async safe, only set a done flag if you want!
+    vTaskDelay(pdMS_TO_TICKS(10));
     usb_host_transfer_free(ctrl1);
 
-    // Second control transfer (set index)
+    // ---- Second control transfer (set index) ----
     usb_transfer_t *ctrl2 = NULL;
-    ESP_ERROR_CHECK(usb_host_transfer_alloc(0, 0, &ctrl2));
+    ESP_ERROR_CHECK(usb_host_transfer_alloc(8, 0, &ctrl2));
     ctrl2->device_handle = dev->dev_hdl;
     ctrl2->bEndpointAddress = 0;
     ctrl2->callback = transfer_cb;
-    ctrl2->num_bytes = 0;
-    ctrl2->bmRequestType = 0x40;
-    ctrl2->bRequest      = 0x9A;
-    ctrl2->wValue        = 0x0F2C;
-    ctrl2->wIndex        = index;
-    ctrl2->wLength       = 0;
+    ctrl2->context = NULL;
+    ctrl2->num_bytes = 8;
+
+    usb_setup_packet_t setup2 = {
+        .bmRequestType = 0x40,
+        .bRequest      = 0x9A,
+        .wValue        = 0x0F2C,
+        .wIndex        = index,
+        .wLength       = 0
+    };
+    memcpy(ctrl2->data_buffer, &setup2, 8);
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl2));
     vTaskDelay(pdMS_TO_TICKS(10));
     usb_host_transfer_free(ctrl2);
 
     ESP_LOGI("CH340", "Configured baudrate to 115200 for CH340.");
 }
-
 /**
  * @brief Example FreeRTOS task that performs USB OTG read and write operations
  *
