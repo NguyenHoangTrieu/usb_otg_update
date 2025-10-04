@@ -4,11 +4,9 @@ static const char *TAG = "ESP32_FLASH_BRIDGE";
 static class_driver_t *s_driver_obj;
 static usb_device_t connected_devices[DEV_MAX_COUNT];
 static uint8_t num_connected_devices = 0;
-volatile bool transfer_done = false;
 
 // Dummy transfer callback for async transfers
 static void transfer_cb(usb_transfer_t *transfer) {
-    transfer_done = true;
     usb_host_transfer_free(transfer);
 }
 
@@ -524,11 +522,7 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
   transfer->timeout_ms = timeout_ms;
   transfer->callback = transfer_cb; // transfer_cb;
   memcpy(transfer->data_buffer, data, len);
-  transfer_done = false;
   err = usb_host_transfer_submit(transfer);
-  while (!transfer_done) {
-    vTaskDelay(1);
-  }
   if (err == ESP_OK) {
     ESP_LOGI("USBOTG", "Sent %d bytes to device: endpoint 0x%02X", (int)len,
              dev->ep_out_addr);
@@ -572,11 +566,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
   transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
   transfer->callback = transfer_cb;
-  transfer_done = false;
   err = usb_host_transfer_submit(transfer);
-  while (!transfer_done) {
-    vTaskDelay(1);
-  }
   if (err == ESP_OK) {
     // In sync (poll) case: memory will have been updated immediately; in
     // async/callback, this part would go into your transfer callback
