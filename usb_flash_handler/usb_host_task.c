@@ -527,7 +527,7 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
 
   if (err == ESP_OK) {
     ESP_LOGI("USBOTG", "Sent %d bytes to device: endpoint 0x%02X", (int)len,
-             dev->dev_addr);
+             dev->ep_out_addr);
   } else {
     ESP_LOGE("USBOTG", "USB Send failed: %d", err);
   }
@@ -567,7 +567,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
 
   transfer->device_handle = dev->dev_hdl;
   transfer->num_bytes = max_len;
-  transfer->bEndpointAddress = dev->ep_out_addr; //  needs to be initialized from descriptor
+  transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
   // Optionally set callback/context if you need async handling
   transfer->callback = transfer_cb;
   err = usb_host_transfer_submit(transfer);
@@ -577,7 +577,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
     memcpy(data, transfer->data_buffer, transfer->actual_num_bytes);
     *actual_len = transfer->actual_num_bytes;
     ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X",
-             (int)*actual_len, dev->dev_addr);
+             (int)*actual_len, dev->ep_in_addr);
   } else {
     *actual_len = 0;
     ESP_LOGE("USBOTG", "USB Read failed: %d", err);
