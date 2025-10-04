@@ -576,8 +576,8 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
     // async/callback, this part would go into your transfer callback
     memcpy(data, transfer->data_buffer, transfer->actual_num_bytes);
     *actual_len = transfer->actual_num_bytes;
-    ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X",
-             (int)*actual_len, dev->ep_in_addr);
+    // ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X",
+    //          (int)*actual_len, dev->ep_in_addr);
   } else {
     *actual_len = 0;
     ESP_LOGE("USBOTG", "USB Read failed: %d", err);
