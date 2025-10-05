@@ -1,5 +1,7 @@
 #include "usb_flash_handler.h"
 
+static const char *TAG = "USB_OTG_RW";
+
 static void transfer_cb(usb_transfer_t *transfer) {
     usb_host_transfer_free(transfer);
 }
@@ -13,7 +15,7 @@ void claim_interface(usb_device_t *device_obj) {
   ESP_ERROR_CHECK(usb_host_interface_claim(device_obj->client_hdl,
                                            device_obj->dev_hdl,
                                            device_obj->interface_num, 0));
-  ESP_LOGI("USBOTG", "Interface %d claimed for device addr %d",
+  ESP_LOGI(TAG, "Interface %d claimed for device addr %d",
            device_obj->interface_num, device_obj->dev_addr);
 }
 
