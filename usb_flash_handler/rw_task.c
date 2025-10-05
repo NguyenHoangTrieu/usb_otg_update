@@ -1,6 +1,24 @@
 #include "usb_flash_handler.h"
 
-static const char *TAG = "USB_OTG_RW";
+static const char *TAG = "USB_OTG_RW";\
+
+#define USB_QUEUE_SIZE 10
+#define USB_BUFFER_SIZE 64 // Adjust to endpoint MPS
+
+// Structure to pass received data from ISR/callback to main USB RW task via queue
+typedef struct {
+    uint8_t *data;
+    size_t len;
+} stream_data_t;
+
+// USB stream context object
+typedef struct {
+    usb_device_t *dev;            // Active device object
+    usb_transfer_t *in_transfer;  // Pointer to transfer handle
+    QueueHandle_t data_queue;     // FreeRTOS queue for data
+    bool running;                 // Streaming flag
+} usb_stream_t;
+
 
 static void transfer_cb(usb_transfer_t *transfer) {
     usb_host_transfer_free(transfer);
@@ -19,37 +37,73 @@ void claim_interface(usb_device_t *device_obj) {
            device_obj->interface_num, device_obj->dev_addr);
 }
 
-typedef struct {
-    SemaphoreHandle_t completion_sem;
-    esp_err_t result;
-    size_t actual_len;
-    uint8_t *user_buffer;
-} transfer_context_t;
+// typedef struct {
+//     SemaphoreHandle_t completion_sem;
+//     esp_err_t result;
+//     size_t actual_len;
+//     uint8_t *user_buffer;
+// } transfer_context_t;
 
-static void receive_transfer_cb(usb_transfer_t *transfer)
-{
-    transfer_context_t *ctx = (transfer_context_t *)transfer->context;
+// static void receive_transfer_cb(usb_transfer_t *transfer)
+// {
+//     transfer_context_t *ctx = (transfer_context_t *)transfer->context;
     
-    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
-        // Copy data to user buffer
-        memcpy(ctx->user_buffer, transfer->data_buffer, transfer->actual_num_bytes);
-        ctx->actual_len = transfer->actual_num_bytes;
-        ctx->result = ESP_OK;
+//     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+//         // Copy data to user buffer
+//         memcpy(ctx->user_buffer, transfer->data_buffer, transfer->actual_num_bytes);
+//         ctx->actual_len = transfer->actual_num_bytes;
+//         ctx->result = ESP_OK;
         
-        ESP_LOGI("USBOTG", "Received %d bytes from endpoint 0x%02X", 
-                 transfer->actual_num_bytes, transfer->bEndpointAddress);
-    } else if (transfer->status == USB_TRANSFER_STATUS_NO_DEVICE) {
-        ESP_LOGW("USBOTG", "Device disconnected during transfer");
-        ctx->result = ESP_ERR_NOT_FOUND;
-        ctx->actual_len = 0;
-    } else {
-        ESP_LOGW("USBOTG", "Transfer failed with status: %d", transfer->status);
-        ctx->result = ESP_FAIL;
-        ctx->actual_len = 0;
-    }
+//         ESP_LOGI("USBOTG", "Received %d bytes from endpoint 0x%02X", 
+//                  transfer->actual_num_bytes, transfer->bEndpointAddress);
+//     } else if (transfer->status == USB_TRANSFER_STATUS_NO_DEVICE) {
+//         ESP_LOGW("USBOTG", "Device disconnected during transfer");
+//         ctx->result = ESP_ERR_NOT_FOUND;
+//         ctx->actual_len = 0;
+//     } else {
+//         ESP_LOGW("USBOTG", "Transfer failed with status: %d", transfer->status);
+//         ctx->result = ESP_FAIL;
+//         ctx->actual_len = 0;
+//     }
     
-    // Signal completion
-    xSemaphoreGive(ctx->completion_sem);
+//     // Signal completion
+//     xSemaphoreGive(ctx->completion_sem);
+// }
+
+/** Callback for asynchronous IN transfers.
+ * Called when data is received from the USB device.
+ * Pushes received data to FreeRTOS queue for processing in main task context.
+ * @param transfer Pointer to completed usb_transfer_t
+ */
+static void cdc_async_receive_cb(usb_transfer_t *transfer) {
+    usb_stream_t *stream = (usb_stream_t *)transfer->context;
+    // Called from usb_host_client_handle_events() context ("task", not ISR)
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0) {
+        // Allocate data object to push to FreeRTOS queue
+        stream_data_t *rx = malloc(sizeof(stream_data_t));
+        if (rx) {
+            rx->data = malloc(transfer->actual_num_bytes);
+            if (rx->data) {
+                memcpy(rx->data, transfer->data_buffer, transfer->actual_num_bytes);
+                rx->len = transfer->actual_num_bytes;
+                // Non-blocking queue push. If queue full, free memory (avoid memory leak)
+                BaseType_t qret = xQueueSend(stream->data_queue, &rx, 0);
+                if (qret != pdTRUE) {
+                    free(rx->data);
+                    free(rx);
+                }
+            } else {
+                free(rx);
+            }
+        }
+        // Resubmit transfer for continuous receiving if streaming is enabled
+        if (stream->running) {
+            usb_host_transfer_submit(transfer);
+        }
+    } else {
+        // On device disconnect or error, stop streaming
+        stream->running = false;
+    }
 }
 
 /** Parses endpoints for CDC/Data class. Call in action_get_config_desc or after
@@ -209,77 +263,104 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
  *
  * @return esp_err_t         ESP_OK if successful, error code otherwise
  */
-esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
-                               size_t *actual_len) {
-    esp_err_t err;
-    usb_transfer_t *transfer = NULL;
+// esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
+//                                size_t *actual_len) {
+//     esp_err_t err;
+//     usb_transfer_t *transfer = NULL;
     
-    if (!dev || dev->dev_hdl == NULL) {
-        ESP_LOGE("USBOTG", "Invalid device handle");
-        *actual_len = 0;
-        return ESP_ERR_INVALID_ARG;
-    }
+//     if (!dev || dev->dev_hdl == NULL) {
+//         ESP_LOGE("USBOTG", "Invalid device handle");
+//         *actual_len = 0;
+//         return ESP_ERR_INVALID_ARG;
+//     }
     
-    // Create context for this transfer
-    transfer_context_t ctx = {
-        .completion_sem = xSemaphoreCreateBinary(),
-        .result = ESP_FAIL,
-        .actual_len = 0,
-        .user_buffer = data
-    };
+//     // Create context for this transfer
+//     transfer_context_t ctx = {
+//         .completion_sem = xSemaphoreCreateBinary(),
+//         .result = ESP_FAIL,
+//         .actual_len = 0,
+//         .user_buffer = data
+//     };
     
-    if (ctx.completion_sem == NULL) {
-        ESP_LOGE("USBOTG", "Failed to create semaphore");
-        return ESP_ERR_NO_MEM;
-    }
+//     if (ctx.completion_sem == NULL) {
+//         ESP_LOGE("USBOTG", "Failed to create semaphore");
+//         return ESP_ERR_NO_MEM;
+//     }
     
-    // Allocate transfer
-    err = usb_host_transfer_alloc(max_len, 0, &transfer);
-    if (err != ESP_OK) {
-        ESP_LOGE("USBOTG", "Failed to allocate transfer struct");
-        vSemaphoreDelete(ctx.completion_sem);
-        *actual_len = 0;
-        return err;
-    }
+//     // Allocate transfer
+//     err = usb_host_transfer_alloc(max_len, 0, &transfer);
+//     if (err != ESP_OK) {
+//         ESP_LOGE("USBOTG", "Failed to allocate transfer struct");
+//         vSemaphoreDelete(ctx.completion_sem);
+//         *actual_len = 0;
+//         return err;
+//     }
     
-    // Setup transfer
-    transfer->device_handle = dev->dev_hdl;
-    transfer->num_bytes = max_len;
-    transfer->bEndpointAddress = dev->ep_in_addr;
-    transfer->callback = receive_transfer_cb;
-    transfer->context = &ctx;
+//     // Setup transfer
+//     transfer->device_handle = dev->dev_hdl;
+//     transfer->num_bytes = max_len;
+//     transfer->bEndpointAddress = dev->ep_in_addr;
+//     transfer->callback = receive_transfer_cb;
+//     transfer->context = &ctx;
     
-    // Submit transfer
-    err = usb_host_transfer_submit(transfer);
-    if (err != ESP_OK) {
-        ESP_LOGE("USBOTG", "USB transfer submit failed: %s", esp_err_to_name(err));
-        usb_host_transfer_free(transfer);
-        vSemaphoreDelete(ctx.completion_sem);
-        *actual_len = 0;
-        return err;
-    }
+//     // Submit transfer
+//     err = usb_host_transfer_submit(transfer);
+//     if (err != ESP_OK) {
+//         ESP_LOGE("USBOTG", "USB transfer submit failed: %s", esp_err_to_name(err));
+//         usb_host_transfer_free(transfer);
+//         vSemaphoreDelete(ctx.completion_sem);
+//         *actual_len = 0;
+//         return err;
+//     }
     
-    // WAIT for transfer completion
-    if (xSemaphoreTake(ctx.completion_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        // Transfer completed
-        *actual_len = ctx.actual_len;
-        err = ctx.result;
-    } else {
-        // Timeout
-        ESP_LOGW("USBOTG", "Transfer timeout");
-        *actual_len = 0;
-        err = ESP_ERR_TIMEOUT;
+//     // WAIT for transfer completion
+//     if (xSemaphoreTake(ctx.completion_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
+//         // Transfer completed
+//         *actual_len = ctx.actual_len;
+//         err = ctx.result;
+//     } else {
+//         // Timeout
+//         ESP_LOGW("USBOTG", "Transfer timeout");
+//         *actual_len = 0;
+//         err = ESP_ERR_TIMEOUT;
         
-        // Cancel the transfer if possible
-        // Note: ESP-IDF doesn't have transfer cancel, so we just wait
+//         // Cancel the transfer if possible
+//         // Note: ESP-IDF doesn't have transfer cancel, so we just wait
+//     }
+    
+//     // Cleanup
+//     usb_host_transfer_free(transfer);
+//     vSemaphoreDelete(ctx.completion_sem);
+    
+//     return err;
+// }
+
+esp_err_t start_usb_cdc_streaming(usb_device_t *dev, usb_stream_t *stream) {
+    stream->dev = dev;
+    stream->data_queue = xQueueCreate(USB_QUEUE_SIZE, sizeof(stream_data_t *));
+    stream->running = true;
+    if (!stream->data_queue) return ESP_ERR_NO_MEM;
+
+    esp_err_t ret = usb_host_transfer_alloc(USB_BUFFER_SIZE, 0, &stream->in_transfer);
+    if (ret != ESP_OK) {
+        vQueueDelete(stream->data_queue);
+        return ret;
     }
-    
-    // Cleanup
-    usb_host_transfer_free(transfer);
-    vSemaphoreDelete(ctx.completion_sem);
-    
-    return err;
+    stream->in_transfer->device_handle = dev->dev_hdl;
+    stream->in_transfer->bEndpointAddress = dev->ep_in_addr;
+    stream->in_transfer->num_bytes = USB_BUFFER_SIZE;
+    stream->in_transfer->callback = cdc_async_receive_cb;
+    stream->in_transfer->context = stream;
+
+    ret = usb_host_transfer_submit(stream->in_transfer);
+    if (ret != ESP_OK) {
+        usb_host_transfer_free(stream->in_transfer);
+        vQueueDelete(stream->data_queue);
+        return ret;
+    }
+    return ESP_OK;
 }
+
 
 void ch340_set_baudrate(usb_device_t *dev) {
     uint32_t divisor = 1532620800UL / 115200UL;
@@ -340,68 +421,139 @@ void ch340_set_baudrate(usb_device_t *dev) {
  * then waits to receive a response back in a loop.
  */
 void usb_otg_rw_task(void *arg) {
-  uint8_t tx_data[] = {'N', 'A', 'T', 'E', ' ', 'H', 'I', 'G', 'G', 'E', 'R', '\n'}; // Example buffer to send
-  uint8_t rx_data[64];                          // Buffer for receiving data
-  size_t actual_len = 0;
-  uint8_t configured = 0;
+    uint8_t tx_data[] = {'N', 'A', 'T', 'E', ' ', 'H', 'I', 'G', 'G', 'E', 'R', '\n'};
+    static usb_stream_t usb_stream; // Persistent stream object; works across reconnect
+    static uint8_t configured = 0;
 
-  while (true) {
-    usb_device_t *dev = NULL;
-    // Protect access to driver handle via mutex
-    xSemaphoreTake(s_driver_obj->constant.mux_lock, portMAX_DELAY);
-    for (uint8_t i = 0; i < DEV_MAX_COUNT; i++) {
-      if (s_driver_obj->mux_protected.device[i].dev_hdl != NULL) {
-        dev = &s_driver_obj->mux_protected.device[i]; // Get the first opened device handle
-        break;
-      }
-    }
-    xSemaphoreGive(s_driver_obj->constant.mux_lock);
+    while (true) {
+        usb_device_t *dev = NULL;
 
-    if (dev != NULL) {
-      // If device found and not yet configured, set baudrate for CH340
-      if (configured == 0) {
-        ch340_set_baudrate(dev);
-        configured = 1; // Only configure once
-        ESP_LOGI("USB_OTG_RW", "CH340 baudrate set to 19200");
-      }
-      // New: Verify device is still valid
-      usb_device_info_t dev_info;
-      esp_err_t err = usb_host_device_info(dev->dev_hdl, &dev_info);
-      if (err != ESP_OK) {
-        ESP_LOGE("USB_OTG_RW",
-                 "Device invalid (err: %d) - likely disconnected. Skipping.",
-                 err);
-        led_show_red(); // Indicate error
-        continue;       // Skip transfers
-      }
-
-      // Proceed with send/receive as before
-      led_show_blue(); // Indicate busy
-      esp_err_t send_ret =
-          usb_cdc_send_data(dev, tx_data, sizeof(tx_data), 100);
-      if (send_ret == ESP_OK) {
-        ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
-      } else {
-        ESP_LOGE("USB_OTG_RW", "Send error: %d", send_ret);
-        led_show_red(); // Indicate error
-      }
-
-      esp_err_t recv_ret =
-          usb_cdc_receive_data(dev, rx_data, sizeof(rx_data), &actual_len);
-      if (recv_ret == ESP_OK && actual_len > 0) {
-        ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
-        for (size_t i = 0; i < actual_len; ++i) {
-          printf("%02X ", rx_data[i]);
+        // Critical section to select the first opened USB device
+        xSemaphoreTake(s_driver_obj->constant.mux_lock, portMAX_DELAY);
+        for (uint8_t i = 0; i < DEV_MAX_COUNT; i++) {
+            if (s_driver_obj->mux_protected.device[i].dev_hdl != NULL) {
+                dev = &s_driver_obj->mux_protected.device[i];
+                break;
+            }
         }
-        printf("\n");
-      } else {
-        ESP_LOGW("USB_OTG_RW", "No data received or error: %d", recv_ret);
-      }
-      led_show_green(); // Indicate done
-    } else {
-      ESP_LOGW("USB_OTG_RW", "No USB device currently opened. Task idle.");
-      led_toggle_white(); // Indicate idle
+        xSemaphoreGive(s_driver_obj->constant.mux_lock);
+
+        if (dev != NULL) {
+            // One-time configuration for a newly detected device
+            if (configured == 0) {
+                ch340_set_baudrate(dev);
+                configured = 1;
+                ESP_LOGI("USB_OTG_RW", "CH340 baudrate set");
+                // Start streaming for this device (setup rx queue)
+                start_usb_cdc_streaming(dev, &usb_stream);
+            }
+            // Check if device is still attached/valid
+            usb_device_info_t dev_info;
+            esp_err_t err = usb_host_device_info(dev->dev_hdl, &dev_info);
+            if (err != ESP_OK) {
+                ESP_LOGE("USB_OTG_RW", "Device invalid (err: %d). Stopping.", err);
+                usb_stream.running = false;
+                configured = 0;
+                led_show_red();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue; // Device now invalid
+            }
+            // Send data over CDC
+            led_show_blue();
+            esp_err_t send_ret = usb_cdc_send_data(dev, tx_data, sizeof(tx_data), 100);
+            if (send_ret == ESP_OK) {
+                ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
+            } else {
+                ESP_LOGE("USB_OTG_RW", "Send error: %d", send_ret);
+                led_show_red();
+            }
+            // Non-blocking receive: poll queue for new data, print any available
+            stream_data_t *rx = NULL;
+            while (xQueueReceive(usb_stream.data_queue, &rx, 0) == pdTRUE) {
+                ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)rx->len);
+                for (size_t i = 0; i < rx->len; ++i) {
+                    printf("%02X ", rx->data[i]);
+                }
+                printf("\n");
+                free(rx->data); free(rx);
+            }
+            led_show_green();
+        } else {
+            // No device present: clean up state and indicate idle
+            if (usb_stream.running) {
+                usb_stream.running = false;
+            }
+            configured = 0;
+            ESP_LOGW("USB_OTG_RW", "No USB device opened. Task idle.");
+            led_toggle_white();
+        }
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
 }
+
+// void usb_otg_rw_task(void *arg) {
+//   uint8_t tx_data[] = {'N', 'A', 'T', 'E', ' ', 'H', 'I', 'G', 'G', 'E', 'R', '\n'}; // Example buffer to send
+//   uint8_t rx_data[64];                          // Buffer for receiving data
+//   size_t actual_len = 0;
+//   uint8_t configured = 0;
+
+//   while (true) {
+//     usb_device_t *dev = NULL;
+//     // Protect access to driver handle via mutex
+//     xSemaphoreTake(s_driver_obj->constant.mux_lock, portMAX_DELAY);
+//     for (uint8_t i = 0; i < DEV_MAX_COUNT; i++) {
+//       if (s_driver_obj->mux_protected.device[i].dev_hdl != NULL) {
+//         dev = &s_driver_obj->mux_protected.device[i]; // Get the first opened device handle
+//         break;
+//       }
+//     }
+//     xSemaphoreGive(s_driver_obj->constant.mux_lock);
+
+//     if (dev != NULL) {
+//       // If device found and not yet configured, set baudrate for CH340
+//       if (configured == 0) {
+//         ch340_set_baudrate(dev);
+//         configured = 1; // Only configure once
+//         ESP_LOGI("USB_OTG_RW", "CH340 baudrate set to 19200");
+//       }
+//       // New: Verify device is still valid
+//       usb_device_info_t dev_info;
+//       esp_err_t err = usb_host_device_info(dev->dev_hdl, &dev_info);
+//       if (err != ESP_OK) {
+//         ESP_LOGE("USB_OTG_RW",
+//                  "Device invalid (err: %d) - likely disconnected. Skipping.",
+//                  err);
+//         led_show_red(); // Indicate error
+//         continue;       // Skip transfers
+//       }
+
+//       // Proceed with send/receive as before
+//       led_show_blue(); // Indicate busy
+//       esp_err_t send_ret =
+//           usb_cdc_send_data(dev, tx_data, sizeof(tx_data), 100);
+//       if (send_ret == ESP_OK) {
+//         ESP_LOGI("USB_OTG_RW", "Sent %d bytes.", (int)sizeof(tx_data));
+//       } else {
+//         ESP_LOGE("USB_OTG_RW", "Send error: %d", send_ret);
+//         led_show_red(); // Indicate error
+//       }
+
+//       esp_err_t recv_ret =
+//           usb_cdc_receive_data(dev, rx_data, sizeof(rx_data), &actual_len);
+//       if (recv_ret == ESP_OK && actual_len > 0) {
+//         ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)actual_len);
+//         for (size_t i = 0; i < actual_len; ++i) {
+//           printf("%02X ", rx_data[i]);
+//         }
+//         printf("\n");
+//       } else {
+//         ESP_LOGW("USB_OTG_RW", "No data received or error: %d", recv_ret);
+//       }
+//       led_show_green(); // Indicate done
+//     } else {
+//       ESP_LOGW("USB_OTG_RW", "No USB device currently opened. Task idle.");
+//       led_toggle_white(); // Indicate idle
+//     }
+//     vTaskDelay(pdMS_TO_TICKS(500));
+//   }
+// }
