@@ -581,7 +581,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
   return err;
 }
 void ch340_set_baudrate_115200(usb_device_t *dev) {
-    uint32_t divisor = 1532620800UL / 115200UL;
+    uint32_t divisor = 1532620800UL / 230400UL;
     if (divisor > 0) divisor--;
     uint16_t value = divisor & 0xFFFF;
     uint16_t index = ((divisor >> 8) & 0xFF) | 0x0080;
@@ -605,8 +605,6 @@ void ch340_set_baudrate_115200(usb_device_t *dev) {
     memcpy(ctrl1->data_buffer, &setup1, sizeof(setup1));
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl1));
     vTaskDelay(pdMS_TO_TICKS(10));
-    // usb_host_transfer_free(ctrl1);
-
     // Second setup packet
     usb_transfer_t *ctrl2 = NULL;
     ESP_ERROR_CHECK(usb_host_transfer_alloc(sizeof(usb_setup_packet_t), 0, &ctrl2));
@@ -626,7 +624,6 @@ void ch340_set_baudrate_115200(usb_device_t *dev) {
     memcpy(ctrl2->data_buffer, &setup2, sizeof(setup2));
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl2));
     vTaskDelay(pdMS_TO_TICKS(10));
-    // usb_host_transfer_free(ctrl2);
 
     ESP_LOGI("CH340", "Configured baudrate to 115200 for CH340.");
 }
