@@ -268,16 +268,56 @@ static void action_get_str_desc(usb_device_t *device_obj) {
  *
  * @param device_obj Pointer to the USB device object to close
  */
-static void action_close_dev(usb_device_t *device_obj) {
-  ESP_ERROR_CHECK(usb_host_device_close(
-      device_obj->client_hdl,
-      device_obj->dev_hdl)); // Close USB device using USB Host Library
-  device_obj->dev_hdl = NULL;
-  device_obj->dev_addr = 0;
-  usb_host_interface_release(device_obj->client_hdl, device_obj->dev_hdl,
-                             device_obj->interface_num);
-  ESP_LOGI(TAG, "Device disconnected and closed");
-  led_show_red(); // Indicate device disconnected
+static void action_close_dev(usb_device_t *device_obj)
+{
+    esp_err_t ret;
+    
+    // Step 0: Halt and flush endpoints if they were active
+    if (device_obj->ep_in_addr != 0x00) {
+        ret = usb_host_endpoint_halt(device_obj->dev_hdl, device_obj->ep_in_addr);
+        if (ret == ESP_OK) {
+            usb_host_endpoint_flush(device_obj->dev_hdl, device_obj->ep_in_addr);
+        }
+    }
+    
+    if (device_obj->ep_out_addr != 0x00) {
+        ret = usb_host_endpoint_halt(device_obj->dev_hdl, device_obj->ep_out_addr);
+        if (ret == ESP_OK) {
+            usb_host_endpoint_flush(device_obj->dev_hdl, device_obj->ep_out_addr);
+        }
+    }
+    
+    // Step 1: Release interface
+    ret = usb_host_interface_release(
+        device_obj->client_hdl, 
+        device_obj->dev_hdl, 
+        device_obj->interface_num
+    );
+    
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Interface %d release failed: %s", 
+                 device_obj->interface_num, esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Interface %d released", device_obj->interface_num);
+    }
+    
+    // Step 2: Close device
+    ret = usb_host_device_close(device_obj->client_hdl, device_obj->dev_hdl);
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Device close failed: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Device closed successfully");
+    }
+    
+    // Step 3: Clean up state
+    device_obj->dev_hdl = NULL;
+    device_obj->dev_addr = 0;
+    device_obj->ep_in_addr = 0x00;
+    device_obj->ep_out_addr = 0x00;
+    device_obj->interface_num = 0;
+    
+    led_show_red();
 }
 
 /**
@@ -652,6 +692,17 @@ void usb_otg_rw_task(void *arg) {
     xSemaphoreGive(s_driver_obj->constant.mux_lock);
 
     if (dev != NULL) {
+      // Verify device is still valid BEFORE operations
+      usb_device_info_t dev_info;
+      esp_err_t err = usb_host_device_info(dev->dev_hdl, &dev_info);
+      
+      if (err != ESP_OK) {
+          ESP_LOGW(USB_OTG_RW, "Device disconnected (err=%d). Waiting...", err);
+          configured = 0;  // Reset configuration flag
+          led_show_red();
+          vTaskDelay(pdMS_TO_TICKS(500));
+          continue;  // Skip transfers, device gone
+      }
       // If device found and not yet configured, set baudrate for CH340
       if (configured == 0) {
         ch340_set_baudrate(dev);
