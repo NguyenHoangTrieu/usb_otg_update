@@ -605,7 +605,7 @@ void ch340_set_baudrate_115200(usb_device_t *dev) {
     memcpy(ctrl1->data_buffer, &setup1, sizeof(setup1));
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl1));
     vTaskDelay(pdMS_TO_TICKS(10));
-    usb_host_transfer_free(ctrl1);
+    // usb_host_transfer_free(ctrl1);
 
     // Second setup packet
     usb_transfer_t *ctrl2 = NULL;
@@ -626,7 +626,7 @@ void ch340_set_baudrate_115200(usb_device_t *dev) {
     memcpy(ctrl2->data_buffer, &setup2, sizeof(setup2));
     ESP_ERROR_CHECK(usb_host_transfer_submit_control(dev->client_hdl, ctrl2));
     vTaskDelay(pdMS_TO_TICKS(10));
-    usb_host_transfer_free(ctrl2);
+    // usb_host_transfer_free(ctrl2);
 
     ESP_LOGI("CH340", "Configured baudrate to 115200 for CH340.");
 }
