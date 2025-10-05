@@ -692,17 +692,6 @@ void usb_otg_rw_task(void *arg) {
     xSemaphoreGive(s_driver_obj->constant.mux_lock);
 
     if (dev != NULL) {
-      // Verify device is still valid BEFORE operations
-      usb_device_info_t dev_info;
-      esp_err_t err = usb_host_device_info(dev->dev_hdl, &dev_info);
-      
-      if (err != ESP_OK) {
-          ESP_LOGW(USB_OTG_RW, "Device disconnected (err=%d). Waiting...", err);
-          configured = 0;  // Reset configuration flag
-          led_show_red();
-          vTaskDelay(pdMS_TO_TICKS(500));
-          continue;  // Skip transfers, device gone
-      }
       // If device found and not yet configured, set baudrate for CH340
       if (configured == 0) {
         ch340_set_baudrate(dev);
