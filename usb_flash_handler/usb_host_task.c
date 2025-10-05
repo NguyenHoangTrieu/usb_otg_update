@@ -581,7 +581,7 @@ esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
   return err;
 }
 void ch340_set_baudrate_115200(usb_device_t *dev) {
-    uint32_t divisor = 1532620800UL / 230400UL;
+    uint32_t divisor = 1532620800UL / 57600UL;
     if (divisor > 0) divisor--;
     uint16_t value = divisor & 0xFFFF;
     uint16_t index = ((divisor >> 8) & 0xFF) | 0x0080;
