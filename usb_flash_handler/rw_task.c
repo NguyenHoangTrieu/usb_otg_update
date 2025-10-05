@@ -474,7 +474,6 @@ void usb_otg_rw_task(void *arg) {
                 for (size_t i = 0; i < rx->len; ++i) {
                     printf("%c", rx->data[i]);
                 }
-                printf("\n");
                 free(rx->data); free(rx);
             }
             led_show_green();
