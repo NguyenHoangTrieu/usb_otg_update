@@ -634,7 +634,7 @@ void ch340_set_baudrate(usb_device_t *dev) {
  * then waits to receive a response back in a loop.
  */
 void usb_otg_rw_task(void *arg) {
-  uint8_t tx_data[] = {'N', 'A', 'T', 'E', ' ', 'H', 'I', 'G', 'G', 'E', 'R'}; // Example buffer to send
+  uint8_t tx_data[] = {'N', 'A', 'T', 'E', ' ', 'H', 'I', 'G', 'G', 'E', 'R', '\n'}; // Example buffer to send
   uint8_t rx_data[64];                          // Buffer for receiving data
   size_t actual_len = 0;
   uint8_t configured = 0;
