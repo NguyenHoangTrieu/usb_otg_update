@@ -79,6 +79,6 @@ extern void usb_host_lib_task(void *arg);
 extern void class_driver_task(void *arg);
 extern void usb_otg_rw_task(void *arg);
 extern void parse_and_cache_endpoints(usb_device_t *dev);
-extern void claim_interface(usb_device_t *dev, uint8_t interface_num);
+extern void claim_interface(usb_device_t *device_obj);
 
 #endif // USB_FLASH_HANDLER_H
