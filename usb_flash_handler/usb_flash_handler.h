@@ -67,6 +67,8 @@ typedef struct {
     } constant;                                 /**< Constant members. Do not change after installation thus do not require a critical section or mutex */
 } class_driver_t;
 
+extern class_driver_t *s_driver_obj;
+
 extern esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len, int timeout_ms);
 extern esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len, size_t *actual_len);
 extern void class_driver_client_deregister(void);
@@ -76,5 +78,6 @@ extern void flash_task(void *arg);
 extern void usb_host_lib_task(void *arg);
 extern void class_driver_task(void *arg);
 extern void usb_otg_rw_task(void *arg);
+extern void parse_and_cache_endpoints(usb_device_t *dev);
 
 #endif // USB_FLASH_HANDLER_H
