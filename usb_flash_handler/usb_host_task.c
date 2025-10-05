@@ -23,6 +23,39 @@ static void claim_interface(usb_device_t *device_obj) {
            device_obj->interface_num, device_obj->dev_addr);
 }
 
+typedef struct {
+    SemaphoreHandle_t completion_sem;
+    esp_err_t result;
+    size_t actual_len;
+    uint8_t *user_buffer;
+} transfer_context_t;
+
+static void receive_transfer_cb(usb_transfer_t *transfer)
+{
+    transfer_context_t *ctx = (transfer_context_t *)transfer->context;
+    
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+        // Copy data to user buffer
+        memcpy(ctx->user_buffer, transfer->data_buffer, transfer->actual_num_bytes);
+        ctx->actual_len = transfer->actual_num_bytes;
+        ctx->result = ESP_OK;
+        
+        ESP_LOGI("USBOTG", "Received %d bytes from endpoint 0x%02X", 
+                 transfer->actual_num_bytes, transfer->bEndpointAddress);
+    } else if (transfer->status == USB_TRANSFER_STATUS_NO_DEVICE) {
+        ESP_LOGW("USBOTG", "Device disconnected during transfer");
+        ctx->result = ESP_ERR_NOT_FOUND;
+        ctx->actual_len = 0;
+    } else {
+        ESP_LOGW("USBOTG", "Transfer failed with status: %d", transfer->status);
+        ctx->result = ESP_FAIL;
+        ctx->actual_len = 0;
+    }
+    
+    // Signal completion
+    xSemaphoreGive(ctx->completion_sem);
+}
+
 /** Parses endpoints for CDC/Data class. Call in action_get_config_desc or after
  * enumeration. Caches endpoint addresses in usb_device_t struct for later use.
  * @param dev Pointer to usb_device_t struct with valid dev_hdl
@@ -637,41 +670,76 @@ esp_err_t usb_cdc_send_data(usb_device_t *dev, const uint8_t *data, size_t len,
  */
 esp_err_t usb_cdc_receive_data(usb_device_t *dev, uint8_t *data, size_t max_len,
                                size_t *actual_len) {
-  esp_err_t err;
-  usb_transfer_t *transfer = NULL;
-
-  if (!dev || dev->dev_hdl == NULL) {
-    ESP_LOGE("USBOTG", "Invalid device handle");
-    *actual_len = 0;
-    return ESP_ERR_INVALID_ARG;
-  }
-
-  err = usb_host_transfer_alloc(max_len, 0, &transfer);
-  if (err != ESP_OK) {
-    ESP_LOGE("USBOTG", "Failed to allocate transfer struct");
-    *actual_len = 0;
+    esp_err_t err;
+    usb_transfer_t *transfer = NULL;
+    
+    if (!dev || dev->dev_hdl == NULL) {
+        ESP_LOGE("USBOTG", "Invalid device handle");
+        *actual_len = 0;
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Create context for this transfer
+    transfer_context_t ctx = {
+        .completion_sem = xSemaphoreCreateBinary(),
+        .result = ESP_FAIL,
+        .actual_len = 0,
+        .user_buffer = data
+    };
+    
+    if (ctx.completion_sem == NULL) {
+        ESP_LOGE("USBOTG", "Failed to create semaphore");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    // Allocate transfer
+    err = usb_host_transfer_alloc(max_len, 0, &transfer);
+    if (err != ESP_OK) {
+        ESP_LOGE("USBOTG", "Failed to allocate transfer struct");
+        vSemaphoreDelete(ctx.completion_sem);
+        *actual_len = 0;
+        return err;
+    }
+    
+    // Setup transfer
+    transfer->device_handle = dev->dev_hdl;
+    transfer->num_bytes = max_len;
+    transfer->bEndpointAddress = dev->ep_in_addr;
+    transfer->callback = receive_transfer_cb;
+    transfer->context = &ctx;
+    
+    // Submit transfer
+    err = usb_host_transfer_submit(transfer);
+    if (err != ESP_OK) {
+        ESP_LOGE("USBOTG", "USB transfer submit failed: %s", esp_err_to_name(err));
+        usb_host_transfer_free(transfer);
+        vSemaphoreDelete(ctx.completion_sem);
+        *actual_len = 0;
+        return err;
+    }
+    
+    // WAIT for transfer completion
+    if (xSemaphoreTake(ctx.completion_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        // Transfer completed
+        *actual_len = ctx.actual_len;
+        err = ctx.result;
+    } else {
+        // Timeout
+        ESP_LOGW("USBOTG", "Transfer timeout");
+        *actual_len = 0;
+        err = ESP_ERR_TIMEOUT;
+        
+        // Cancel the transfer if possible
+        // Note: ESP-IDF doesn't have transfer cancel, so we just wait
+    }
+    
+    // Cleanup
+    usb_host_transfer_free(transfer);
+    vSemaphoreDelete(ctx.completion_sem);
+    
     return err;
-  }
-
-  transfer->device_handle = dev->dev_hdl;
-  transfer->num_bytes = max_len;
-  transfer->bEndpointAddress = dev->ep_in_addr; //  needs to be initialized from descriptor
-  // Optionally set callback/context if you need async handling
-  transfer->callback = transfer_cb;
-  err = usb_host_transfer_submit(transfer);
-  if (err == ESP_OK) {
-    // In sync (poll) case: memory will have been updated immediately; in
-    // async/callback, this part would go into your transfer callback
-    memcpy(data, transfer->data_buffer, transfer->actual_num_bytes);
-    *actual_len = transfer->actual_num_bytes;
-    ESP_LOGI("USBOTG", "Received %d bytes from device: endpoint 0x%02X",
-             (int)*actual_len, dev->ep_in_addr);
-  } else {
-    *actual_len = 0;
-    ESP_LOGE("USBOTG", "USB Read failed: %d", err);
-  }
-  return err;
 }
+
 void ch340_set_baudrate(usb_device_t *dev) {
     uint32_t divisor = 1532620800UL / 115200UL;
     if (divisor > 0) divisor--;
