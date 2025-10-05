@@ -472,7 +472,7 @@ void usb_otg_rw_task(void *arg) {
             while (xQueueReceive(usb_stream.data_queue, &rx, 0) == pdTRUE) {
                 ESP_LOGI("USB_OTG_RW", "Received %d bytes:", (int)rx->len);
                 for (size_t i = 0; i < rx->len; ++i) {
-                    printf("%02X ", rx->data[i]);
+                    printf("%c", rx->data[i]);
                 }
                 printf("\n");
                 free(rx->data); free(rx);
